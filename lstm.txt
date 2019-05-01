@@ -1,0 +1,72 @@
+#dataset from kaggle
+import pandas as pd
+df1 = pd.read_csv('labeledTrainData.tsv', delimiter="\t")#imdb sentiment dataset from kaggle
+df1 = df1.drop(['id'], axis=1)
+df1.head()
+df1.shape
+import re
+import nltk
+nltk.download('stopwords')
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import stopwords
+nltk.download('wordnet')
+stop_words = set(stopwords.words("english")) 
+lemmatizer = WordNetLemmatizer()
+
+
+def clean_text(text):
+    text = re.sub(r'[^\w\s]','',text, re.UNICODE)
+    text = text.lower()
+    text = [lemmatizer.lemmatize(token) for token in text.split(" ")]
+    text = [lemmatizer.lemmatize(token, "v") for token in text]
+    text = [word for word in text if not word in stop_words]
+    text = " ".join(text)
+    return text
+
+df1['processed_review'] = df1.review.apply(lambda x: clean_text(x))
+df1.processed_review.head()
+df1.processed_review.apply(lambda x: len(x.split(" "))).mean()
+X_train = df1.loc[:15000, 'processed_review'].values
+y_train = df1.loc[:15000, 'sentiment'].values
+X_test = df1.loc[15001:, 'processed_review'].values
+y_test = df1.loc[15001:, 'sentiment'].values
+
+from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
+from keras.layers import Dense , Input , LSTM , Embedding, Dropout , Activation, GRU, Flatten
+from keras.layers import Bidirectional, GlobalMaxPool1D
+from keras.models import Model, Sequential
+from keras.layers import Convolution1D
+from keras import initializers, regularizers, constraints, optimizers, layers
+
+max_features = 6000
+tokenizer = Tokenizer(num_words=max_features)
+tokenizer.fit_on_texts(X_train)
+list_tokenized_train = tokenizer.texts_to_sequences(X_train)
+
+maxlen = 130
+X_t = pad_sequences(list_tokenized_train, maxlen=maxlen)
+
+embed_size = 128
+model = Sequential()
+model.add(Embedding(max_features, embed_size))
+model.add(Bidirectional(LSTM(32, return_sequences = True)))
+model.add(GlobalMaxPool1D())
+model.add(Dense(20, activation="relu"))
+model.add(Dropout(0.05))
+model.add(Dense(1, activation="sigmoid"))
+model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+batch_size = 100
+epochs = 3#can be improved using cv
+model.fit(X_t,y_train, batch_size=batch_size, epochs=epochs, validation_split=0.2)
+
+list_tokenized_test = tokenizer.texts_to_sequences(X_test)
+X_te = pad_sequences(list_tokenized_test, maxlen=maxlen)
+prediction = model.predict(X_te)
+y_pred = (prediction > 0.5) #setting threshold for positive and negative sentiments
+from sklearn.metrics import f1_score, confusion_matrix
+print('F1-score: {0}'.format(f1_score(y_pred, y_test)))
+print('Confusion matrix:')
+confusion_matrix(y_pred, y_test)
+#accuracy at 86 percent
